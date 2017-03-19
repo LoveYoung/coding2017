@@ -42,7 +42,13 @@ public class FileDownloader {
     private RandomAccessFile randomAccessFile;
     private String fileFullPath;
     private AtomicInteger failThreadNum=new AtomicInteger(0);
+    private String downloadResult;
+    private Proxy proxy;
 
+
+    public void setProxy(Proxy proxy) {
+        this.proxy = proxy;
+    }
 
     public void setListener(FileListener fileListener) {
         this.fileListener = fileListener;
@@ -50,6 +56,7 @@ public class FileDownloader {
 
 
     private void downloadFail(String message) {
+        downloadResult = message;
         failThreadNum.incrementAndGet();
         logger.info("download fail ! error info=> "+message);
     }
@@ -181,7 +188,14 @@ public class FileDownloader {
 
         logger.info("file download finished !");
         if(fileListener!=null)
-            fileListener.afterDownload();
+            if(downloadResult==null){
+            downloadResult="success";
+            }
+            if(failThreadNum.get()>0){
+
+
+            }
+            fileListener.afterDownload(downloadResult);
     }
 
     private void startDownloadTask(int start, int end) {
@@ -217,9 +231,14 @@ public class FileDownloader {
 
     private void loadData(int start, int end) {
         InputStream inputStream = null;
-        try {
-            Proxy proxy = new Proxy(Proxy.Type.HTTP,new InetSocketAddress("127.0.0.1", 8888));
-            HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection(proxy);
+        try{
+            HttpURLConnection connection;
+            if(proxy!=null){
+                connection = (HttpURLConnection) new URL(url).openConnection(proxy);
+            }else{
+                connection=(HttpURLConnection) new URL(url).openConnection();
+            }
+
 
 //                connection.addRequestProperty("User-Agent", "Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 5.1; .NET CLR 2.0.50727");
             connection.addRequestProperty("Range", "bytes=" + start + "-" + end);
@@ -287,8 +306,9 @@ public class FileDownloader {
 
         /**
          * after download
+         * @param downloadResult
          */
-        void afterDownload();
+        void afterDownload(String downloadResult);
     }
 
 }
