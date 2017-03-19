@@ -2,14 +2,17 @@ package com.yang;
 
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.FilenameUtils;
-import org.apache.commons.io.IOUtils;
+import org.apache.commons.io.output.ByteArrayOutputStream;
 import org.apache.commons.lang3.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.RandomAccessFile;
 import java.net.*;
+import java.text.DecimalFormat;
 import java.util.LinkedHashSet;
 import java.util.LinkedList;
 import java.util.List;
@@ -23,9 +26,11 @@ import java.util.concurrent.atomic.AtomicInteger;
  * multi thread download
  */
 public class FileDownloader {
+    Logger logger= LoggerFactory.getLogger(FileDownloader.class);
     private String url;
     private String destinationPath;
 
+    private  AtomicInteger recevivedLength=new AtomicInteger(0);
     private String  fileName;
     private int threadNum;
     /**
@@ -44,9 +49,9 @@ public class FileDownloader {
     }
 
 
-    public void downloadFail(String message) {
+    private void downloadFail(String message) {
         failThreadNum.incrementAndGet();
-        System.out.println(Thread.currentThread().getName()+" download fail ! error info=> "+message);
+        logger.info("download fail ! error info=> "+message);
     }
 
     /**
@@ -100,7 +105,7 @@ public class FileDownloader {
         URL url=new URL(this.url);
         URLConnection connection = url.openConnection();
         int fileLength = connection.getContentLength();//todo think about different condition this fileLength value;
-        System.out.println("file size is "+FileDownloader.convertFileSize(fileLength));
+        logger.info("file size is "+convertFileSize(fileLength));
         int fileSegmentLength = fileLength / threadNum;
 
 
@@ -116,7 +121,7 @@ public class FileDownloader {
         if(file.exists()){
            FileUtils.forceDelete(file);
         }
-        System.out.println("fileFullPath："+fileFullPath);
+        logger.info("fileFullPath："+fileFullPath);
         randomAccessFile = new RandomAccessFile(fileFullPath, "rw");
         randomAccessFile.setLength(fileLength);
         int start=0;
@@ -136,9 +141,17 @@ public class FileDownloader {
 
 
         Set<Thread> finishedThread=new LinkedHashSet<>(threadNum);
-        System.out.println("file downloading .....");
+        DecimalFormat    df   = new DecimalFormat("######0.00");
         while (finishedThread.size()<threadNum&&failThreadNum.get()<1){
 
+            try {
+                Thread.sleep(1000L);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+
+
+            logger.info("file has download "+df.format(recevivedLength.get()*100.0/fileLength)+"%");
             synchronized (threadList){
                 threadList.forEach(t->{
                     if(!t.isAlive()){
@@ -150,7 +163,7 @@ public class FileDownloader {
 
         }
 
-
+        logger.info("file has download "+df.format(recevivedLength.get()*100.0/fileLength)+"%");
 
         if(failThreadNum.get()>0){
             try {
@@ -161,12 +174,12 @@ public class FileDownloader {
                 }
 
             } catch (IOException e) {
-                System.out.println(" delete file fail ! error info :"+e.getMessage());
+                logger.error(" delete file fail ! error info :"+e.getMessage());
             }
         }
 
 
-        System.out.println("file download finished !");
+        logger.info("file download finished !");
         if(fileListener!=null)
             fileListener.afterDownload();
     }
@@ -175,7 +188,7 @@ public class FileDownloader {
         Thread thread = new Thread(() -> {
 
 
-            System.out.println(Thread.currentThread().getName() + " start to download file !");
+            logger.info("start to download file !");
             loadData(start, end);
 
         }
@@ -183,6 +196,23 @@ public class FileDownloader {
         );
         thread.start();
         threadList.add(thread);
+    }
+
+    private ThreadLocal<Integer> threadLocal=new ThreadLocal();
+
+    private byte[] toByteArray(InputStream input) throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        int increaseVal = 0;//download timeout ,recevivedLength  resume to be initVal
+
+        int n;
+        byte[] buffer = new byte[4096];
+        for(; -1 != (n = input.read(buffer)); ) {
+            increaseVal+=n;
+            threadLocal.set(increaseVal);
+           this.recevivedLength.addAndGet(n);
+            output.write(buffer, 0, n);
+        }
+        return output.toByteArray();
     }
 
     private void loadData(int start, int end) {
@@ -196,13 +226,15 @@ public class FileDownloader {
             connection.setReadTimeout(60*1000);
             connection.setConnectTimeout(60*1000);//todo   setReadTimeout setConnectTimeout  how to work
             inputStream = connection.getInputStream();
-            byte[] bytes = IOUtils.toByteArray(inputStream);//todo principle of this method
+            byte[] bytes = toByteArray(inputStream);//todo principle of this method
             randomAccessFile.seek(start);
             randomAccessFile.write(bytes);
-            System.out.println(Thread.currentThread().getName() + " finished task !");
+            logger.info(" finished task !");
         } catch (IOException e) {
+            Integer increaseVal = threadLocal.get();
+            recevivedLength.set(recevivedLength.get()-increaseVal);
             if(e instanceof SocketTimeoutException){
-                System.out.println(Thread.currentThread().getName()+"=="+e.getMessage()+",retry again!");
+                logger.error(e.getMessage()+",retry again!");
                 loadData(start,end);
             }else{
                 downloadFail(e.getMessage());
@@ -220,26 +252,10 @@ public class FileDownloader {
         }
     }
 
-    interface FileListener{
-        /**
-         * before download
-         */
-         void beforeDownload();
-
-        /**
-         * downloading
-         */
-        void downloading();
-
-        /**
-         * after download
-         */
-         void afterDownload();
-    }
 
 
 
-    public static String convertFileSize(long size) {
+    private  String convertFileSize(long size) {
         long kb = 1024;
         long mb = kb * 1024;
         long gb = mb * 1024;
@@ -255,11 +271,32 @@ public class FileDownloader {
         } else
             return String.format("%d B", size);
     }
+
+
+
+    interface FileListener{
+        /**
+         * before download
+         */
+        void beforeDownload();
+
+        /**
+         * downloading
+         */
+        void downloading();
+
+        /**
+         * after download
+         */
+        void afterDownload();
+    }
+
 }
 
 
 //todo 1.break point retry(断点续传)   how to test this function point=>disconnect internet and re connect
 //todo 2.accele download speed
-//todo 3.illegal  fileName filter
-//todo 4.progress bar
+// 3.illegal  fileName filter
+//todo 4.progress bar  //there is a bug   then timeout
 //todo 5.email tips
+//todo 6.logger print log,remove System.out.println

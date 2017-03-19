@@ -1,12 +1,24 @@
 package com.yang;
 
+import org.apache.log4j.BasicConfigurator;
+import org.junit.Before;
 import org.junit.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Created by Dev_yang on 2017/3/18.
  */
 public class FileDownloaderTest {
 
+    private Logger logger= LoggerFactory.getLogger(FileDownloaderTest.class);
+
+
+    @Before
+    public void setUp() throws Exception {
+
+        BasicConfigurator.configure();
+    }
 
     @Test
     public void startDownload() throws Exception {
@@ -40,4 +52,9 @@ public class FileDownloaderTest {
     }
 
 
+    @Test
+    public void name() throws Exception {
+        logger.info("test");
+
+    }
 }
